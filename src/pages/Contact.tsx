@@ -79,7 +79,7 @@ const Contact = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground">support@stubplus.com</p>
+                <p className="text-muted-foreground">bhuvanpranav18@gmail.com</p>
               </CardContent>
             </Card>
 
@@ -91,7 +91,7 @@ const Contact = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground">+1 (555) 123-4567</p>
+                <p className="text-muted-foreground">+91 7975985930</p>
               </CardContent>
             </Card>
 
@@ -104,9 +104,9 @@ const Contact = () => {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
-                  123 Tech Street<br />
-                  San Francisco, CA 94102<br />
-                  United States
+                  4th main road<br />
+                  Bengaluru, 560061<br />
+                  India
                 </p>
               </CardContent>
             </Card>
