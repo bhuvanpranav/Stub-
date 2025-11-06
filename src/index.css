@@ -1,12 +1,7 @@
-
 /* stylelint-disable at-rule-no-unknown */
-/* stylelint-disable-next-line at-rule-no-unknown */
-@import "tailwindcss/base";
-/* stylelint-disable-next-line at-rule-no-unknown */
-@import "tailwindcss/components";
-/* stylelint-disable-next-line at-rule-no-unknown */
-@import "tailwindcss/utilities";
-
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 /* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
 All colors MUST be HSL.
 */

@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../integrations/supabase/client";
-import type { User } from "@supabase/supabase-js";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { supabase } from "@/integrations/supabase/client";
+import { User } from "@supabase/supabase-js";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import Navigation from "@/components/Navigation";
+import Footer from "@/components/Footer";
 import { toast } from "sonner";
 
 const Dashboard = () => {
@@ -41,14 +43,18 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p>Loading...</p>
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="flex items-center justify-center py-32">
+          <p>Loading...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary/20 via-background to-accent/20">
+    <div className="min-h-screen bg-background">
+      <Navigation />
       <div className="container mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl font-bold">STUB+ Dashboard</h1>
@@ -119,6 +125,7 @@ const Dashboard = () => {
           </Card>
         </div>
       </div>
+      <Footer />
     </div>
   );
 };
