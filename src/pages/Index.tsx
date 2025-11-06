@@ -8,10 +8,17 @@ import ImpactSection from "@/components/ImpactSection";
 import CTASection from "@/components/CTASection";
 import Footer from "@/components/Footer";
 
+
+import PilotBanner from "@/components/PilotBanner";
+
+
+
 const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
+     
+      <PilotBanner/>
       <Hero />
       <ProblemSection />
       <SolutionSection />

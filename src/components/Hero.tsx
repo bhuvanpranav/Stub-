@@ -30,7 +30,7 @@ const Hero = () => {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm">
             <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium">NFT-Powered Ticketing Platform</span>
+            <span className="text-sm font-medium">Stub+ — Your Ticket, Upgraded. Secure. Tradeable. Collectible.</span>
           </div>
 
           {/* Main Heading */}
@@ -56,7 +56,7 @@ const Hero = () => {
             </Button>
             <Button variant="heroOutline" size="lg">
               <Shield className="w-5 h-5" />
-              How It Works
+              Claim Demo Ticket
             </Button>
           </div>
 
