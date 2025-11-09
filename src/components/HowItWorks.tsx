@@ -47,7 +47,7 @@ const HowItWorks = () => {
   ];
 
   return (
-    <section className="py-24 relative overflow-hidden bg-gradient-to-b from-background to-muted/20">
+    <section id="how-it-works" className="py-24 relative overflow-hidden bg-gradient-to-b from-background to-muted/20">
       <div className="container px-4">
         <div className="max-w-6xl mx-auto">
           {/* Section Header */}

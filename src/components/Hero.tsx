@@ -1,4 +1,4 @@
-import { Button } from "../components/ui/button";
+import { Button } from "@/components/ui/button";
 import { ArrowRight, Shield, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import heroImage from "@/assets/hero-concert.jpg";
@@ -30,7 +30,7 @@ const Hero = () => {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 backdrop-blur-sm">
             <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium">Stub+ — Your Ticket, Upgraded. Secure. Tradeable. Collectible.</span>
+            <span className="text-sm font-medium">NFT-Powered Ticketing Platform</span>
           </div>
 
           {/* Main Heading */}
@@ -54,9 +54,13 @@ const Hero = () => {
               Get Started
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Button>
-            <Button variant="heroOutline" size="lg">
+            <Button 
+              variant="heroOutline" 
+              size="lg"
+              onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
+            >
               <Shield className="w-5 h-5" />
-              Claim Demo Ticket
+              How It Works
             </Button>
           </div>
 
