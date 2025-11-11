@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const key_id = process.env.VITE_RAZORPAY_KEY_ID;
     const key_secret = process.env.RAZORPAY_KEY_SECRET;
     const supabase_url = process.env.VITE_SUPABASE_URL;
-    const supabase_key = process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const supabase_key = process.env.SUPABASE_SERVICE_ROLE;
 
     if (!key_id || !key_secret) {
       console.error("❌ Razorpay keys missing:", { key_id, hasSecret: !!key_secret });
