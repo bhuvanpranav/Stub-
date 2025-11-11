@@ -51,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       order = await rzp.orders.create({
         amount: amount_paise,
         currency: "INR",
-        receipt: `evt_${ev.id}_${Date.now()}`,
+        
         notes: { eventId: ev.id, qty: String(quantity), email }
       });
     } catch (e: any) {
