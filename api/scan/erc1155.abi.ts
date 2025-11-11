@@ -1,3 +1,5 @@
+import type { Abi } from "viem";
+
 const erc1155Abi = [
   {
     inputs: [
@@ -9,5 +11,6 @@ const erc1155Abi = [
     stateMutability: "view",
     type: "function"
   }
-] as const;
+] as const satisfies Abi;
+
 export default erc1155Abi;

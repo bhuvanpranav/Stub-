@@ -1,3 +1,5 @@
+import type { Abi } from "viem";
+
 const erc721Abi = [
   {
     inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
@@ -6,5 +8,6 @@ const erc721Abi = [
     stateMutability: "view",
     type: "function"
   }
-] as const;
+] as const satisfies Abi;
+
 export default erc721Abi;
