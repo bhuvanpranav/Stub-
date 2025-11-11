@@ -12,6 +12,7 @@ const supabase = createClient(
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method !== "POST") return res.status(405).send("Method not allowed");
+    res.json({ ok: true });
     const { eventId, qty = 1, email = "" } = req.body || {};
 
     // 1) Fetch event price (or hardcode for now)
