@@ -106,13 +106,18 @@ export default function EventListings() {
 
     try {
       // your API must exist (via vercel dev or deployed)
+      console.log("Creating order with:", { eventId: selectedEvent.id, qty, email });
+
       const startRes = await fetch("/api/checkout/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ eventId: selectedEvent.id, qty, email }),
+      
       });
 
       if (!startRes.ok) {
+        const txt = await startRes.text();
+  console.error("create-order failed:", startRes.status, txt);
         alert("Could not create order. Please try again.");
         setSubmitting(false);
         return;
