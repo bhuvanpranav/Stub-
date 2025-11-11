@@ -2,86 +2,71 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Razorpay from "razorpay";
 import { createClient } from "@supabase/supabase-js";
 
-const must = (v: string | undefined, name: string) => {
-  if (!v) throw new Error(`env_missing:${name}`);
-  return v;
-};
+export const config = { runtime: "nodejs18.x" }; // ensure Node runtime
 
 const supabase = createClient(
-  must(process.env.VITE_SUPABASE_URL, "VITE_SUPABASE_URL"),
-  must(process.env.SUPABASE_SERVICE_ROLE, "SUPABASE_SERVICE_ROLE")
+  process.env.VITE_SUPABASE_URL!,
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY!
 );
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method !== "POST") return res.status(405).send("Method not allowed");
-    if (!req.headers["content-type"]?.includes("application/json")) {
-      return res.status(400).json({ error: "bad_content_type" });
-    }
+    const { eventId, qty = 1, email = "" } = req.body || {};
 
-    const { eventId, qty, email } = req.body ?? {};
-    if (!eventId || !qty || !email) {
-      return res.status(400).json({ error: "missing_fields" });
-    }
-
+    // 1) Fetch event price (or hardcode for now)
     const { data: ev, error: evErr } = await supabase
       .from("events")
-      .select("id,title,price_rupees")
+      .select("id, title, price_rupees")
       .eq("id", eventId)
       .single();
     if (evErr || !ev) return res.status(404).json({ error: "event_not_found" });
 
-    const price = Number(ev.price_rupees ?? 0);
-    const quantity = Number(qty);
-    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: "invalid_event_price" });
-    if (!Number.isFinite(quantity) || quantity < 1) return res.status(400).json({ error: "invalid_qty" });
+    const amount_paise = Number(ev.price_rupees) * Number(qty) * 100;
 
-    const amount_paise = price * quantity * 100;
-    if (amount_paise < 100) return res.status(400).json({ error: "amount_too_low" });
+    // 2) Init Razorpay with TEST keys
+    const keyId = process.env.VITE_RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
 
-    const key_id = must(process.env.VITE_RAZORPAY_KEY_ID, "VITE_RAZORPAY_KEY_ID");
-    const key_secret = must(process.env.RAZORPAY_KEY_SECRET, "RAZORPAY_KEY_SECRET");
-    const rzp = new Razorpay({ key_id, key_secret });
+    // 🔎 DEBUG (safe): log only prefixes/lengths
+    console.log("rzp key id (prefix):", keyId?.slice(0, 10));
+    console.log("rzp secret length:", keySecret?.length);
 
-    // 🔒 Minimal payload — NO receipt at all.
-    const payload: any = {
+    const rzp = new Razorpay({
+      key_id: keyId as string,
+      key_secret: keySecret as string,
+    });
+
+    // 3) Receipt must be <= 40 chars
+    const shortEvent = String(ev.id).replace(/[^a-z0-9]/gi, "").slice(0, 8);
+    const shortTs = Date.now().toString().slice(-8);
+    const receipt = `ev_${shortEvent}_${shortTs}`; // always < 40
+
+    // 4) Create order
+    const order = await rzp.orders.create({
       amount: amount_paise,
       currency: "INR",
-      notes: { eventId: ev.id, qty: String(quantity), email },
-    };
+      receipt,
+      notes: { eventId: ev.id, qty: String(qty), email },
+    });
 
-    console.log("rzp.orders.create payload:", payload); // <-- will show in Vercel function logs
-
-    let order;
-    try {
-      order = await rzp.orders.create(payload);
-    } catch (e: any) {
-      const detail =
-        e?.error?.description ||
-        e?.error?.reason ||
-        e?.description ||
-        e?.message ||
-        JSON.stringify(e);
-      console.error("razorpay_create_failed:", e); // full object
-      return res.status(500).json({ error: "razorpay_create_failed", detail });
-    }
-
+    // 5) Store local order
     const { data: ord, error: ordErr } = await supabase
       .from("orders")
       .insert({
         provider_order_id: order.id,
         email,
-        qty: quantity,
+        qty,
         amount_paise,
         event_id: ev.id,
         status: "pending",
       })
       .select("id")
       .single();
-    if (ordErr) return res.status(500).json({ error: "db_insert_failed", detail: ordErr.message || ordErr });
+    if (ordErr) return res.status(500).json({ error: "db_order_insert_failed" });
 
     return res.json({
-      key: key_id,
+      key: keyId,                // used by frontend checkout
       orderId: order.id,
       amount: order.amount,
       currency: "INR",
@@ -89,9 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       eventTitle: ev.title,
     });
   } catch (e: any) {
-    const msg = e?.message || String(e);
-    if (msg.startsWith("env_missing:")) return res.status(500).json({ error: "env_missing", name: msg.split(":")[1] });
-    console.error("checkout_start_fatal:", e);
-    return res.status(500).json({ error: "server_error", detail: msg });
+    console.error("razorpay_create_failed:", e); // <- check Vercel logs if 500
+    return res.status(500).json({ error: "razorpay_create_failed", detail: e });
   }
 }
