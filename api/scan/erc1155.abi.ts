@@ -1,4 +1,3 @@
-// Minimal ERC-1155 ABI for balanceOf
 const erc1155Abi = [
   {
     inputs: [
@@ -11,5 +10,4 @@ const erc1155Abi = [
     type: "function"
   }
 ] as const;
-
 export default erc1155Abi;

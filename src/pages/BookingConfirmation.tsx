@@ -48,18 +48,38 @@ const BookingConfirmation = () => {
   };
 
   useEffect(() => {
-    // Get booking data from localStorage
-    const storedBooking = localStorage.getItem('latestBooking');
-    if (!storedBooking) {
-      toast.error('No booking found');
-      navigate('/events');
-      return;
+  const storedBooking = localStorage.getItem("latestBooking");
+  if (!storedBooking) {
+    toast.error("No booking found");
+    navigate("/events");
+    return;
+  }
+
+  const booking = JSON.parse(storedBooking);
+  setBookingData(booking);
+  setQrValue(generateQRValue());
+
+  // ✅ Poll backend for Razorpay payment status
+  const pollStatus = async () => {
+    try {
+      const q = new URLSearchParams();
+      q.set("orderId", booking.orderId || "");
+      const res = await fetch(`/api/orders/status?${q.toString()}`);
+      const data = await res.json();
+      if (data.status === "paid") {
+        toast.success("Payment verified successfully!");
+      } else if (data.status === "failed") {
+        toast.error("Payment verification failed");
+      }
+    } catch (err) {
+      console.error("Status check error:", err);
     }
-    
-    const booking = JSON.parse(storedBooking);
-    setBookingData(booking);
-    setQrValue(generateQRValue());
-  }, [navigate]);
+  };
+
+  const poller = setInterval(pollStatus, 5000);
+  return () => clearInterval(poller);
+}, [navigate]);
+
 
   useEffect(() => {
     if (!bookingData) return;

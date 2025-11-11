@@ -1,421 +1,286 @@
-import Navigation from "@/components/Navigation";
-import Footer from "@/components/Footer";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Calendar, MapPin, Search, Ticket } from "lucide-react";
+// src/pages/EventListings.tsx
+import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useState } from "react";
-import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
-const EventListings = () => {
-  const { city, type } = useParams<{ city: string; type: string }>();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState<any>(null);
-  const [numberOfTickets, setNumberOfTickets] = useState(1);
-  const [bookingForms, setBookingForms] = useState([{
-    name: "",
-    age: "",
-    email: "",
-    phone: "",
-    address: "",
-    sex: ""
-  }]);
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
-  // Mock events data - in real app, this would come from a database
-  const allEvents = [
-    {
-      id: 1,
-      title: "Summer Music Festival",
-      date: "August 15, 2025",
-      location: "Grand Plaza",
-      type: "concert",
-      city: "bengaluru",
-      image: "https://images.unsplash.com/photo-1459749411175-04bf5292ceea",
-      price: "₹3,999"
-    },
-    {
-      id: 2,
-      title: "Saturday Night Party",
-      date: "August 20, 2025",
-      location: "Club Matrix",
-      type: "party",
-      city: "bengaluru",
-      image: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819",
-      price: "₹2,499"
-    },
-    {
-      id: 3,
-      title: "Cricket Premier League",
-      date: "September 5, 2025",
-      location: "Stadium Arena",
-      type: "sports",
-      city: "bengaluru",
-      image: "https://images.unsplash.com/photo-1531415074968-036ba1b575da",
-      price: "₹2,899"
-    },
-    {
-      id: 4,
-      title: "Comedy Night Live",
-      date: "August 25, 2025",
-      location: "Laugh Factory",
-      type: "stand-up",
-      city: "bengaluru",
-      image: "https://images.unsplash.com/photo-1585699324551-f6c309eedeca",
-      price: "₹1,999"
-    },
-    {
-      id: 5,
-      title: "Rock Concert Experience",
-      date: "September 10, 2025",
-      location: "Arena Hall",
-      type: "concert",
-      city: "mumbai",
-      image: "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3",
-      price: "₹4,499"
-    },
-    {
-      id: 6,
-      title: "Techno Night",
-      date: "August 30, 2025",
-      location: "Underground Club",
-      type: "party",
-      city: "mumbai",
-      image: "https://images.unsplash.com/photo-1571266028243-d220e2ffaa53",
-      price: "₹2,899"
-    }
-  ];
+/** Load Razorpay SDK once */
+let razorpayLoaded = false;
+const loadRazorpay = () =>
+  new Promise<boolean>((resolve) => {
+    if (window.Razorpay || razorpayLoaded) return resolve(true);
+    const s = document.createElement("script");
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => {
+      razorpayLoaded = true;
+      resolve(true);
+    };
+    s.onerror = () => resolve(false);
+    document.body.appendChild(s);
+  });
 
-  const filteredEvents = allEvents.filter(event => 
-    event.city === city?.toLowerCase() && 
-    event.type === type?.toLowerCase() &&
-    (searchQuery === "" || event.title.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+type EventRow = {
+  id: string;
+  title?: string | null;
+  city?: string | null;
+  venue?: string | null;
+  cover_url?: string | null;
+  price_rupees?: number | null;
+  starts_at?: string | null; // ISO
+  is_active?: boolean | null;
+  created_at?: string | null;
+};
 
-  const handleBookNow = (event: any) => {
-    setSelectedEvent(event);
-    setNumberOfTickets(1);
-    setBookingForms([{
-      name: "",
-      age: "",
-      email: "",
-      phone: "",
-      address: "",
-      sex: ""
-    }]);
-    setBookingDialogOpen(true);
-  };
+export default function EventListings() {
+  const { city } = useParams(); // supports /events/:city/:category
+  const [events, setEvents] = useState<EventRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleTicketNumberChange = (num: number) => {
-    setNumberOfTickets(num);
-    const newForms = Array(num).fill(null).map((_, index) => 
-      bookingForms[index] || {
-        name: "",
-        age: "",
-        email: "",
-        phone: "",
-        address: "",
-        sex: ""
-      }
-    );
-    setBookingForms(newForms);
-  };
+  // booking state
+  const [selectedEvent, setSelectedEvent] = useState<EventRow | null>(null);
+  const [email, setEmail] = useState("");
+  const [qty, setQty] = useState<number>(1);
+  const [submitting, setSubmitting] = useState(false);
+  const [showBooking, setShowBooking] = useState(false);
 
-  const updateBookingForm = (index: number, field: string, value: string) => {
-    const updatedForms = [...bookingForms];
-    updatedForms[index] = { ...updatedForms[index], [field]: value };
-    setBookingForms(updatedForms);
-  };
+  useEffect(() => {
+    (async () => {
+      // explicit columns to avoid 400s on unknown fields
+      let q = supabase
+        .from("events")
+        .select(
+          "id,title,city,venue,cover_url,price_rupees,starts_at,is_active,created_at"
+        );
 
-  const loadRazorpay = () => {
-    return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
+      // ✅ case-insensitive city match (fixes bengaluru vs Bengaluru)
+      if (city) q = q.ilike("city", city);
 
-  const handleBookingSubmit = async (e: React.FormEvent) => {
+      const { data, error } = await q
+        .order("starts_at", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (error) console.error("Events load error:", error);
+      console.log("Loaded events:", data, "Error:", error);
+
+      setEvents(data || []);
+      setLoading(false);
+    })();
+  }, [city]);
+
+  function openBooking(ev: EventRow) {
+    setSelectedEvent(ev);
+    setQty(1);
+    setShowBooking(true);
+  }
+  function closeBooking() {
+    setShowBooking(false);
+    setSelectedEvent(null);
+    setSubmitting(false);
+  }
+
+  async function handleBookingSubmit(e: React.FormEvent) {
     e.preventDefault();
-    
-    // Load Razorpay SDK
-    const res = await loadRazorpay();
-    if (!res) {
-      toast.error('Failed to load payment gateway');
+    if (!selectedEvent) return;
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      alert("Please enter a valid email.");
+      return;
+    }
+    if (qty < 1) {
+      alert("Quantity must be at least 1.");
       return;
     }
 
-    // Calculate total amount
-    const priceValue = parseInt(selectedEvent.price.replace(/[^0-9]/g, ''));
-    const totalAmount = priceValue * numberOfTickets;
+    setSubmitting(true);
+    const ok = await loadRazorpay();
+    if (!ok) {
+      alert("Failed to load payment gateway");
+      setSubmitting(false);
+      return;
+    }
 
-    // Create Razorpay order options
-    const options = {
-      key: 'rzp_test_demo', // Demo key for testing
-      amount: totalAmount * 100, // Amount in paise
-      currency: 'INR',
-      name: 'Stub Events',
-      description: `${numberOfTickets} ticket(s) for ${selectedEvent.title}`,
-      image: 'https://example.com/logo.png',
-      handler: function (response: any) {
-        // Store booking data and navigate to confirmation
-        const bookingData = {
-          event: selectedEvent,
-          attendees: bookingForms,
-          numberOfTickets,
-          totalAmount,
-          paymentId: response.razorpay_payment_id,
-          bookingId: `STUB${Date.now()}`,
-          bookingDate: new Date().toISOString()
-        };
-        
-        localStorage.setItem('latestBooking', JSON.stringify(bookingData));
-        toast.success('Payment successful!');
-        setBookingDialogOpen(false);
-        window.location.href = `/booking-confirmation`;
-      },
-      prefill: {
-        name: bookingForms[0].name,
-        email: bookingForms[0].email,
-        contact: bookingForms[0].phone
-      },
-      theme: {
-        color: '#3399cc'
+    try {
+      // your API must exist (via vercel dev or deployed)
+      const startRes = await fetch("/api/checkout/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: selectedEvent.id, qty, email }),
+      });
+
+      if (!startRes.ok) {
+        alert("Could not create order. Please try again.");
+        setSubmitting(false);
+        return;
       }
-    };
 
-    const paymentObject = new (window as any).Razorpay(options);
-    paymentObject.open();
-  };
+      const startData = (await startRes.json()) as {
+        key: string;
+        orderId: string;
+        amount: number;
+        currency: string;
+        localOrderId: string;
+      };
+
+      const rzp = new window.Razorpay({
+        key: startData.key || import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: startData.amount,
+        currency: startData.currency || "INR",
+        name: "Stub+",
+        description: `${qty} ticket(s) for ${selectedEvent.title || "Event"}`,
+        order_id: startData.orderId,
+        prefill: { email },
+        handler: (response: any) => {
+          window.location.href = `/booking-confirmation?order_id=${encodeURIComponent(
+            startData.localOrderId
+          )}&rzp_order=${encodeURIComponent(
+            startData.orderId
+          )}&payment_id=${encodeURIComponent(
+            response.razorpay_payment_id
+          )}`;
+        },
+        theme: { color: "#1e293b" },
+      });
+
+      rzp.open();
+      setSubmitting(false);
+      setShowBooking(false);
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong while starting the payment.");
+      setSubmitting(false);
+    }
+  }
+
+  if (loading) return <div className="p-6">Loading events…</div>;
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navigation />
-      
-      {/* Header with Search */}
-      <section className="relative py-20 overflow-hidden bg-gradient-to-br from-primary/20 via-secondary/10 to-accent/20">
-        <div className="container px-4 relative z-10">
-          <div className="max-w-4xl mx-auto text-center mb-8">
-            <h1 className="text-5xl md:text-6xl font-bold mb-4 capitalize">
-              {type} Events in {city}
-            </h1>
-            <p className="text-xl text-muted-foreground">
-              Discover amazing {type} events happening near you
+    <div className="mx-auto max-w-6xl p-6">
+      <h1 className="text-2xl font-bold mb-4">Events</h1>
+
+      {/* Events grid */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {events.map((ev) => {
+          const title = ev.title || "Untitled Event";
+          const img = ev.cover_url || "/placeholder-cover.jpg"; // add this file under /public
+          const c = ev.city || "—";
+          const v = ev.venue ? ` · ${ev.venue}` : "";
+          const when = ev.starts_at
+            ? new Date(ev.starts_at).toLocaleString()
+            : "TBA";
+          const price = Number(ev.price_rupees ?? 0);
+
+          return (
+            <div
+              key={ev.id}
+              className="rounded-xl border overflow-hidden bg-[#0B0B0D] text-white/90"
+            >
+              <img
+                src={img}
+                alt={title}
+                className="w-full h-40 object-cover bg-slate-100"
+              />
+              <div className="p-4">
+                <div className="font-semibold">{title}</div>
+                <div className="text-sm text-slate-400">
+                  {c}
+                  {v} · {when}
+                </div>
+                <div className="mt-2 text-lg">₹ {price}</div>
+                <button
+                  className="mt-3 px-4 py-2 rounded bg-black text-white hover:opacity-90"
+                  onClick={() => openBooking(ev)}
+                >
+                  Book
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Booking modal */}
+      {showBooking && selectedEvent && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div className="modal bg-white w-full max-w-md rounded-xl p-5 shadow-xl text-slate-900">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                Book: {selectedEvent.title || "Event"}
+              </h2>
+              <button
+                className="text-slate-500 hover:text-slate-700"
+                onClick={closeBooking}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleBookingSubmit} className="mt-4 space-y-3">
+              <div>
+                <label className="text-sm font-medium">Email</label>
+                <input
+                  type="email"
+                  className="mt-1 w-full rounded px-3 py-2 bg-white text-slate-900 placeholder-slate-500 border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Quantity</label>
+                <input
+                  type="number"
+                  min={1}
+                  className="mt-1 w-full rounded px-3 py-2 bg-white text-slate-900 placeholder-slate-500 border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  value={qty}
+                  onChange={(e) =>
+                    setQty(Math.max(1, Number(e.target.value || 1)))
+                  }
+                  required
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <div className="text-sm text-slate-700">
+                  Total:{" "}
+                  <span className="font-semibold">
+                    ₹ {Number(selectedEvent.price_rupees ?? 0) * qty}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="px-4 py-2 rounded border"
+                    onClick={closeBooking}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded bg-black text-white hover:opacity-90 disabled:opacity-60"
+                    disabled={submitting}
+                  >
+                    {submitting ? "Processing…" : "Proceed to Pay"}
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            <p className="text-xs text-slate-500 mt-3">
+              Payments are processed securely by Razorpay. You will be
+              redirected to a confirmation page after payment.
             </p>
           </div>
-          
-          {/* Search Bar */}
-          <div className="max-w-2xl mx-auto">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-              <Input 
-                placeholder="Search events..."
-                className="pl-12 h-14 text-lg"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
         </div>
-      </section>
-
-      {/* Events Grid */}
-      <section className="container px-4 py-16">
-        {filteredEvents.length === 0 ? (
-          <div className="text-center py-20">
-            <p className="text-2xl text-muted-foreground">No events found matching your search.</p>
-          </div>
-        ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
-            {filteredEvents.map((event) => (
-              <Card key={event.id} className="overflow-hidden hover:shadow-xl transition-shadow group">
-                <div className="aspect-video relative overflow-hidden">
-                  <img 
-                    src={event.image} 
-                    alt={event.title}
-                    className="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300"
-                  />
-                  <div className="absolute top-4 right-4 bg-primary text-primary-foreground px-3 py-1 rounded-full text-sm font-bold">
-                    {event.price}
-                  </div>
-                </div>
-                <CardHeader>
-                  <CardTitle className="text-xl">{event.title}</CardTitle>
-                  <CardDescription className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
-                      {event.date}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4" />
-                      {event.location}
-                    </div>
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button 
-                    className="w-full gap-2" 
-                    onClick={() => handleBookNow(event)}
-                  >
-                    <Ticket className="w-4 h-4" />
-                    Book Now
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Booking Dialog */}
-      <Dialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Book Your Tickets</DialogTitle>
-            <DialogDescription>
-              Complete your booking for {selectedEvent?.title}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleBookingSubmit} className="space-y-6 mt-4">
-            {/* Number of Tickets */}
-            <div className="space-y-2">
-              <Label htmlFor="numberOfTickets">Number of Tickets *</Label>
-              <Select
-                value={numberOfTickets.toString()}
-                onValueChange={(value) => handleTicketNumberChange(parseInt(value))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select number of tickets" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                    <SelectItem key={num} value={num.toString()}>
-                      {num} {num === 1 ? 'Ticket' : 'Tickets'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Attendee Forms */}
-            {bookingForms.map((form, index) => (
-              <div key={index} className="space-y-4 p-4 border rounded-lg bg-muted/30">
-                <h3 className="font-semibold text-lg">Attendee {index + 1}</h3>
-                
-                <div className="space-y-2">
-                  <Label htmlFor={`name-${index}`}>Full Name *</Label>
-                  <Input
-                    id={`name-${index}`}
-                    required
-                    value={form.name}
-                    onChange={(e) => updateBookingForm(index, 'name', e.target.value)}
-                    placeholder="Enter full name"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor={`age-${index}`}>Age *</Label>
-                  <Input
-                    id={`age-${index}`}
-                    type="number"
-                    required
-                    value={form.age}
-                    onChange={(e) => updateBookingForm(index, 'age', e.target.value)}
-                    placeholder="Enter age"
-                    min="1"
-                    max="120"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`email-${index}`}>Email *</Label>
-                  <Input
-                    id={`email-${index}`}
-                    type="email"
-                    required
-                    value={form.email}
-                    onChange={(e) => updateBookingForm(index, 'email', e.target.value)}
-                    placeholder="your.email@example.com"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`phone-${index}`}>Phone Number *</Label>
-                  <Input
-                    id={`phone-${index}`}
-                    type="tel"
-                    required
-                    value={form.phone}
-                    onChange={(e) => updateBookingForm(index, 'phone', e.target.value)}
-                    placeholder="+91 XXXXX XXXXX"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`address-${index}`}>Address *</Label>
-                  <Input
-                    id={`address-${index}`}
-                    required
-                    value={form.address}
-                    onChange={(e) => updateBookingForm(index, 'address', e.target.value)}
-                    placeholder="Enter address"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`sex-${index}`}>Gender *</Label>
-                  <Select
-                    required
-                    value={form.sex}
-                    onValueChange={(value) => updateBookingForm(index, 'sex', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select gender" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                      <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            ))}
-
-            {/* Payment Summary */}
-            <div className="pt-4 space-y-3 border-t">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Price per ticket:</span>
-                <span className="font-semibold">{selectedEvent?.price}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Number of tickets:</span>
-                <span className="font-semibold">{numberOfTickets}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-bold">Total Amount:</span>
-                <span className="font-bold text-2xl text-primary">
-                  ₹{(parseInt(selectedEvent?.price.replace(/[^0-9]/g, '') || '0') * numberOfTickets).toLocaleString('en-IN')}
-                </span>
-              </div>
-              <Button type="submit" className="w-full" size="lg">
-                Proceed to Payment
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Footer />
+      )}
     </div>
   );
-};
-
-export default EventListings;
+}

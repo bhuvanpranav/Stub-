@@ -1,4 +1,3 @@
-// Minimal ERC-721 ABI for ownerOf
 const erc721Abi = [
   {
     inputs: [{ internalType: "uint256", name: "tokenId", type: "uint256" }],
@@ -8,5 +7,4 @@ const erc721Abi = [
     type: "function"
   }
 ] as const;
-
 export default erc721Abi;

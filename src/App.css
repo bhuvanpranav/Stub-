@@ -40,3 +40,17 @@
 .read-the-docs {
   color: #888;
 }
+/* ---- Force readable inputs inside our booking modal ---- */
+.modal input,
+.modal select,
+.modal textarea {
+  background: #fff !important;
+  color: #0f172a !important;            /* slate-900 */
+  border: 1px solid #cbd5e1 !important; /* slate-300 */
+}
+
+.modal input::placeholder,
+.modal textarea::placeholder {
+  color: #64748b !important;            /* slate-500 */
+  opacity: 1;
+}
