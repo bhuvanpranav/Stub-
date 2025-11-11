@@ -16,14 +16,15 @@ const EventListings = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [bookingDialogOpen, setBookingDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
-  const [bookingForm, setBookingForm] = useState({
+  const [numberOfTickets, setNumberOfTickets] = useState(1);
+  const [bookingForms, setBookingForms] = useState([{
     name: "",
     age: "",
     email: "",
     phone: "",
     address: "",
     sex: ""
-  });
+  }]);
 
   // Mock events data - in real app, this would come from a database
   const allEvents = [
@@ -97,21 +98,100 @@ const EventListings = () => {
 
   const handleBookNow = (event: any) => {
     setSelectedEvent(event);
-    setBookingDialogOpen(true);
-  };
-
-  const handleBookingSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    toast.success(`Booking confirmed for ${selectedEvent.title}!`);
-    setBookingDialogOpen(false);
-    setBookingForm({
+    setNumberOfTickets(1);
+    setBookingForms([{
       name: "",
       age: "",
       email: "",
       phone: "",
       address: "",
       sex: ""
+    }]);
+    setBookingDialogOpen(true);
+  };
+
+  const handleTicketNumberChange = (num: number) => {
+    setNumberOfTickets(num);
+    const newForms = Array(num).fill(null).map((_, index) => 
+      bookingForms[index] || {
+        name: "",
+        age: "",
+        email: "",
+        phone: "",
+        address: "",
+        sex: ""
+      }
+    );
+    setBookingForms(newForms);
+  };
+
+  const updateBookingForm = (index: number, field: string, value: string) => {
+    const updatedForms = [...bookingForms];
+    updatedForms[index] = { ...updatedForms[index], [field]: value };
+    setBookingForms(updatedForms);
+  };
+
+  const loadRazorpay = () => {
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
     });
+  };
+
+  const handleBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Load Razorpay SDK
+    const res = await loadRazorpay();
+    if (!res) {
+      toast.error('Failed to load payment gateway');
+      return;
+    }
+
+    // Calculate total amount
+    const priceValue = parseInt(selectedEvent.price.replace(/[^0-9]/g, ''));
+    const totalAmount = priceValue * numberOfTickets;
+
+    // Create Razorpay order options
+    const options = {
+      key: 'rzp_test_demo', // Demo key for testing
+      amount: totalAmount * 100, // Amount in paise
+      currency: 'INR',
+      name: 'Stub Events',
+      description: `${numberOfTickets} ticket(s) for ${selectedEvent.title}`,
+      image: 'https://example.com/logo.png',
+      handler: function (response: any) {
+        // Store booking data and navigate to confirmation
+        const bookingData = {
+          event: selectedEvent,
+          attendees: bookingForms,
+          numberOfTickets,
+          totalAmount,
+          paymentId: response.razorpay_payment_id,
+          bookingId: `STUB${Date.now()}`,
+          bookingDate: new Date().toISOString()
+        };
+        
+        localStorage.setItem('latestBooking', JSON.stringify(bookingData));
+        toast.success('Payment successful!');
+        setBookingDialogOpen(false);
+        window.location.href = `/booking-confirmation`;
+      },
+      prefill: {
+        name: bookingForms[0].name,
+        email: bookingForms[0].email,
+        contact: bookingForms[0].phone
+      },
+      theme: {
+        color: '#3399cc'
+      }
+    };
+
+    const paymentObject = new (window as any).Razorpay(options);
+    paymentObject.open();
   };
 
   return (
@@ -195,100 +275,138 @@ const EventListings = () => {
 
       {/* Booking Dialog */}
       <Dialog open={bookingDialogOpen} onOpenChange={setBookingDialogOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Book Your Ticket</DialogTitle>
+            <DialogTitle>Book Your Tickets</DialogTitle>
             <DialogDescription>
               Complete your booking for {selectedEvent?.title}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleBookingSubmit} className="space-y-4 mt-4">
+          <form onSubmit={handleBookingSubmit} className="space-y-6 mt-4">
+            {/* Number of Tickets */}
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name *</Label>
-              <Input
-                id="name"
-                required
-                value={bookingForm.name}
-                onChange={(e) => setBookingForm({...bookingForm, name: e.target.value})}
-                placeholder="Enter your full name"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="age">Age *</Label>
-              <Input
-                id="age"
-                type="number"
-                required
-                value={bookingForm.age}
-                onChange={(e) => setBookingForm({...bookingForm, age: e.target.value})}
-                placeholder="Enter your age"
-                min="1"
-                max="120"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">Email *</Label>
-              <Input
-                id="email"
-                type="email"
-                required
-                value={bookingForm.email}
-                onChange={(e) => setBookingForm({...bookingForm, email: e.target.value})}
-                placeholder="your.email@example.com"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number *</Label>
-              <Input
-                id="phone"
-                type="tel"
-                required
-                value={bookingForm.phone}
-                onChange={(e) => setBookingForm({...bookingForm, phone: e.target.value})}
-                placeholder="+91 XXXXX XXXXX"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="address">Address *</Label>
-              <Input
-                id="address"
-                required
-                value={bookingForm.address}
-                onChange={(e) => setBookingForm({...bookingForm, address: e.target.value})}
-                placeholder="Enter your address"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="sex">Gender *</Label>
+              <Label htmlFor="numberOfTickets">Number of Tickets *</Label>
               <Select
-                required
-                value={bookingForm.sex}
-                onValueChange={(value) => setBookingForm({...bookingForm, sex: value})}
+                value={numberOfTickets.toString()}
+                onValueChange={(value) => handleTicketNumberChange(parseInt(value))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select gender" />
+                  <SelectValue placeholder="Select number of tickets" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="male">Male</SelectItem>
-                  <SelectItem value="female">Female</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                  <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+                    <SelectItem key={num} value={num.toString()}>
+                      {num} {num === 1 ? 'Ticket' : 'Tickets'}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="pt-4 space-y-2">
+            {/* Attendee Forms */}
+            {bookingForms.map((form, index) => (
+              <div key={index} className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                <h3 className="font-semibold text-lg">Attendee {index + 1}</h3>
+                
+                <div className="space-y-2">
+                  <Label htmlFor={`name-${index}`}>Full Name *</Label>
+                  <Input
+                    id={`name-${index}`}
+                    required
+                    value={form.name}
+                    onChange={(e) => updateBookingForm(index, 'name', e.target.value)}
+                    placeholder="Enter full name"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor={`age-${index}`}>Age *</Label>
+                  <Input
+                    id={`age-${index}`}
+                    type="number"
+                    required
+                    value={form.age}
+                    onChange={(e) => updateBookingForm(index, 'age', e.target.value)}
+                    placeholder="Enter age"
+                    min="1"
+                    max="120"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`email-${index}`}>Email *</Label>
+                  <Input
+                    id={`email-${index}`}
+                    type="email"
+                    required
+                    value={form.email}
+                    onChange={(e) => updateBookingForm(index, 'email', e.target.value)}
+                    placeholder="your.email@example.com"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`phone-${index}`}>Phone Number *</Label>
+                  <Input
+                    id={`phone-${index}`}
+                    type="tel"
+                    required
+                    value={form.phone}
+                    onChange={(e) => updateBookingForm(index, 'phone', e.target.value)}
+                    placeholder="+91 XXXXX XXXXX"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`address-${index}`}>Address *</Label>
+                  <Input
+                    id={`address-${index}`}
+                    required
+                    value={form.address}
+                    onChange={(e) => updateBookingForm(index, 'address', e.target.value)}
+                    placeholder="Enter address"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`sex-${index}`}>Gender *</Label>
+                  <Select
+                    required
+                    value={form.sex}
+                    onValueChange={(value) => updateBookingForm(index, 'sex', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select gender" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                      <SelectItem value="prefer-not-to-say">Prefer not to say</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ))}
+
+            {/* Payment Summary */}
+            <div className="pt-4 space-y-3 border-t">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Ticket Price:</span>
-                <span className="font-bold text-lg">{selectedEvent?.price}</span>
+                <span className="text-muted-foreground">Price per ticket:</span>
+                <span className="font-semibold">{selectedEvent?.price}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Number of tickets:</span>
+                <span className="font-semibold">{numberOfTickets}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-lg font-bold">Total Amount:</span>
+                <span className="font-bold text-2xl text-primary">
+                  ₹{(parseInt(selectedEvent?.price.replace(/[^0-9]/g, '') || '0') * numberOfTickets).toLocaleString('en-IN')}
+                </span>
               </div>
               <Button type="submit" className="w-full" size="lg">
-                Confirm Booking
+                Proceed to Payment
               </Button>
             </div>
           </form>
