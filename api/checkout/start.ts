@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Razorpay from "razorpay";
 import { createClient } from "@supabase/supabase-js";
 
-export const config = { runtime: "nodejs18.x" }; // ensure Node runtime
+export const config = { runtime: "nodejs" }; // ensure Node runtime
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
