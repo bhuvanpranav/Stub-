@@ -44,18 +44,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const standard = (process.env.TOKEN_STANDARD || "erc1155").toLowerCase();
 
       if (standard === "erc1155") {
-        const bal = await client.readContract({ address: contract, abi: erc1155Abi as Abi, functionName: "balanceOf", args: [addr, BigInt(tkt.token_id)] })as bigint;
-        if (bal  <= 0n) return res.status(400).json({ ok:false, reason:"not_owner_onchain" });
+   const bal = (await (client as any).readContract({
+  address: contract as `0x${string}`,
+  abi: erc1155Abi as Abi,
+  functionName: "balanceOf",
+  args: [addr as `0x${string}`, BigInt(tkt.token_id!)],
+})) as bigint;
+
+if (bal <= 0n) return res.status(400).json({ ok:false, reason:"not_owner_onchain" });
       } else {
-        const owner = await client.readContract({
-  address: contract,
+   const owner = (await (client as any).readContract({
+  address: contract as `0x${string}`,
   abi: erc721Abi as Abi,
   functionName: "ownerOf",
-  args: [BigInt(tkt.token_id!)]
-}) as `0x${string}`;
+  args: [BigInt(tkt.token_id!)],
+})) as `0x${string}`;
 
 if (owner.toLowerCase() !== addr.toLowerCase()) {
-  return res.status(400).json({ ok: false, reason: "not_owner_onchain" });
+  return res.status(400).json({ ok:false, reason:"not_owner_onchain" });
 }
       }
     }

@@ -67,11 +67,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         receipt: `evt_${ev.id}_${Date.now()}`,
         notes: { eventId: ev.id, qty: String(qty), email },
       });
-    } catch (e: any) {
-      console.error("razorpay_create_failed:", e?.message || e);
-      return res.status(500).json({ error: "razorpay_create_failed", detail: e?.message || String(e) });
-    }
-
+   } catch (e: any) {
+  console.error("razorpay_create_failed:", e);
+  const detail =
+    e?.error?.description ||
+    e?.error?.reason ||
+    e?.message ||
+    JSON.stringify(e);
+  return res.status(500).json({ error: "razorpay_create_failed", detail });
+}
     // 3) DB insert (use service role to bypass RLS)
     const { data: ord, error: ordErr } = await supabase
       .from("orders")
