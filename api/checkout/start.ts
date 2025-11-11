@@ -9,7 +9,7 @@ const must = (v: string | undefined, name: string) => {
 
 const supabase = createClient(
   must(process.env.VITE_SUPABASE_URL, "VITE_SUPABASE_URL"),
-  must(process.env.SUPABASE_SERVICE_ROLE, "SUPABASE_SERVICE_ROLE") // service role here
+  must(process.env.SUPABASE_SERVICE_ROLE, "SUPABASE_SERVICE_ROLE")
 );
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -21,10 +21,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { eventId, qty, email } = req.body ?? {};
     if (!eventId || !qty || !email) {
-      return res.status(400).json({ error: "missing_fields", eventId: !!eventId, qty: !!qty, email: !!email });
+      return res.status(400).json({ error: "missing_fields" });
     }
 
-    // Load event & amount
     const { data: ev, error: evErr } = await supabase
       .from("events")
       .select("id,title,price_rupees")
@@ -34,39 +33,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const price = Number(ev.price_rupees ?? 0);
     const quantity = Number(qty);
-    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: "invalid_event_price", price });
-    if (!Number.isFinite(quantity) || quantity < 1) return res.status(400).json({ error: "invalid_qty", qty });
+    if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: "invalid_event_price" });
+    if (!Number.isFinite(quantity) || quantity < 1) return res.status(400).json({ error: "invalid_qty" });
 
     const amount_paise = price * quantity * 100;
-    if (amount_paise < 100) return res.status(400).json({ error: "amount_too_low", amount_paise });
+    if (amount_paise < 100) return res.status(400).json({ error: "amount_too_low" });
 
-    // Razorpay keys (must be from same mode: both TEST or both LIVE)
     const key_id = must(process.env.VITE_RAZORPAY_KEY_ID, "VITE_RAZORPAY_KEY_ID");
     const key_secret = must(process.env.RAZORPAY_KEY_SECRET, "RAZORPAY_KEY_SECRET");
     const rzp = new Razorpay({ key_id, key_secret });
 
-    // Create order
+    // 🔒 Minimal payload — NO receipt at all.
+    const payload: any = {
+      amount: amount_paise,
+      currency: "INR",
+      notes: { eventId: ev.id, qty: String(quantity), email },
+    };
+
+    console.log("rzp.orders.create payload:", payload); // <-- will show in Vercel function logs
+
     let order;
     try {
-      order = await rzp.orders.create({
-        amount: amount_paise,
-        currency: "INR",
-        
-        notes: { eventId: ev.id, qty: String(quantity), email }
-      });
+      order = await rzp.orders.create(payload);
     } catch (e: any) {
-      // EXTRACT A HUMAN MESSAGE
       const detail =
         e?.error?.description ||
         e?.error?.reason ||
         e?.description ||
         e?.message ||
         JSON.stringify(e);
-      console.error("razorpay_create_failed:", e); // full object in Vercel logs
+      console.error("razorpay_create_failed:", e); // full object
       return res.status(500).json({ error: "razorpay_create_failed", detail });
     }
 
-    // Persist order
     const { data: ord, error: ordErr } = await supabase
       .from("orders")
       .insert({
@@ -75,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         qty: quantity,
         amount_paise,
         event_id: ev.id,
-        status: "pending"
+        status: "pending",
       })
       .select("id")
       .single();
@@ -87,13 +86,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       amount: order.amount,
       currency: "INR",
       localOrderId: ord.id,
-      eventTitle: ev.title
+      eventTitle: ev.title,
     });
   } catch (e: any) {
     const msg = e?.message || String(e);
-    if (msg.startsWith("env_missing:")) {
-      return res.status(500).json({ error: "env_missing", name: msg.split(":")[1] });
-    }
+    if (msg.startsWith("env_missing:")) return res.status(500).json({ error: "env_missing", name: msg.split(":")[1] });
     console.error("checkout_start_fatal:", e);
     return res.status(500).json({ error: "server_error", detail: msg });
   }
