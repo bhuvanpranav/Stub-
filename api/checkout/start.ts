@@ -3,93 +3,78 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Razorpay from "razorpay";
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL!;
-const SUPABASE_PUBLISHABLE_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY!;
-const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE!; // server only
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE!   // IMPORTANT: use SERVICE_ROLE on server
+);
 
-const RAZORPAY_KEY_ID = process.env.VITE_RAZORPAY_KEY_ID!;
-const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET!;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE); // service role for server
-
-const rzp = new Razorpay({
-  key_id: RAZORPAY_KEY_ID,
-  key_secret: RAZORPAY_KEY_SECRET
-});
+// Helper to make a short receipt (Razorpay limits to 40 chars)
+function makeReceipt(eventId: string) {
+  return `ev_${eventId.slice(0, 20)}_${Date.now().toString().slice(-6)}`.slice(0, 40);
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ error: "method_not_allowed" });
-
-    const { eventId, qty = 1, email = "" } = req.body || {};
+    if (req.method !== "POST") return res.status(405).send("Method not allowed");
+    const { eventId, qty = 1, email } = req.body as { eventId: string; qty?: number; email?: string };
     if (!eventId) return res.status(400).json({ error: "missing_eventId" });
 
-    // Load event from DB (short select)
     const { data: ev, error: evErr } = await supabase
-      .from("events")
-      .select("id,price_rupees,title")
-      .eq("id", eventId)
-      .limit(1)
-      .single();
+      .from("events").select("id,price_rupees,title").eq("id", eventId).single();
 
-    if (evErr || !ev) {
-      console.error("event load failed:", evErr);
-      return res.status(404).json({ error: "event_not_found" });
-    }
+    if (evErr || !ev) return res.status(404).json({ error: "event_not_found" });
 
-    // amount in paise
-    const amountPaise = Number(ev.price_rupees || 0) * Number(qty) * 100;
+    const amount_paise = Number(ev.price_rupees) * Number(qty) * 100;
 
-    // generate a short receipt (<= 40 chars)
-    const shortReceipt = `r_${Date.now() % 1000000000}`; // short and unique-ish
-
-    // Create Razorpay order
-    const rzpOrder = await rzp.orders.create({
-      amount: amountPaise,
-      currency: "INR",
-      receipt: shortReceipt,      // <-- keep receipt short
-      notes: { eventId: String(eventId), qty: String(qty), email: String(email) }
-    }).catch((err: any) => {
-      // log and rethrow to be handled below
-      console.error("rzp.orders.create error:", err);
-      throw err;
+    // Razorpay init
+    const rzp = new Razorpay({
+      key_id: process.env.VITE_RAZORPAY_KEY_ID!,
+      key_secret: process.env.RAZORPAY_KEY_SECRET!
     });
 
-    // Insert a local order record in Supabase
+    const orderPayload = {
+      amount: amount_paise,
+      currency: "INR",
+      receipt: makeReceipt(ev.id),
+      notes: { eventId: ev.id, qty: String(qty), email: email || "" }
+    };
+
+    let rzpOrder;
+    try {
+      rzpOrder = await rzp.orders.create(orderPayload);
+    } catch (err: any) {
+      console.error("razorpay_create_failed:", err);
+      return res.status(500).json({ error: "razorpay_create_failed", detail: err });
+    }
+
     const { data: ord, error: ordErr } = await supabase
       .from("orders")
       .insert({
-        provider_order_id: rzpOrder?.id,
-        email,
+        provider_order_id: rzpOrder.id,
+        email: email || null,
         qty,
-        amount_paise: amountPaise,
-        event_id: eventId,
-        status: "pending",
+        amount_paise,
+        event_id: ev.id,
+        status: "pending"
       })
       .select("id")
       .single();
 
-    if (ordErr) {
-      console.error("supabase order insert failed:", ordErr);
-      // still return rzp order to allow client to attempt (but mark error)
-      return res.status(500).json({ error: "db_insert_failed", detail: ordErr.message || ordErr });
+    if (ordErr || !ord) {
+      console.error("db_insert_failed:", ordErr);
+      return res.status(500).json({ error: "db_insert_failed", detail: ordErr });
     }
 
-    // Return the data the client expects
     return res.json({
-      key: RAZORPAY_KEY_ID,          // client uses this to open checkout
-      orderId: rzpOrder?.id,         // razorpay order id
-      amount: rzpOrder?.amount,      // amount (paise)
-      currency: rzpOrder?.currency || "INR",
-      localOrderId: ord?.id
+      key: process.env.VITE_RAZORPAY_KEY_ID,
+      orderId: rzpOrder.id,
+      amount: rzpOrder.amount,
+      currency: "INR",
+      localOrderId: ord.id,
+      eventTitle: ev.title
     });
-
-  } catch (err: any) {
-    console.error("checkout/start caught error:", err);
-    // If err from Razorpay, include readable details but not secrets
-    if (err?.statusCode && err?.error) {
-      return res.status(500).json({ error: "razorpay_create_failed", detail: err.error || err });
-    }
-    return res.status(500).json({ error: "unknown_error", detail: String(err) });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({ error: e.message });
   }
 }

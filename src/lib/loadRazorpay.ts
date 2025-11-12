@@ -1,3 +1,4 @@
+// src/lib/loadRazorpay.ts
 export function loadRazorpay(): Promise<void> {
   return new Promise((resolve, reject) => {
     if ((window as any).Razorpay) return resolve();
