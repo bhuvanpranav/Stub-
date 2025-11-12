@@ -54,3 +54,17 @@
   color: #64748b !important;            /* slate-500 */
   opacity: 1;
 }
+/* modal input visibility fix */
+.modal input,
+.modal select,
+.modal textarea {
+  background: #fff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+.modal input::placeholder,
+.modal textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
