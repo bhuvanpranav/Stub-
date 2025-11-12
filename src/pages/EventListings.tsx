@@ -1,5 +1,6 @@
 // src/pages/EventListings.tsx
-import { loadRazorpay } from "@/lib/loadRazorpay";
+
+
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,11 +13,6 @@ import { Calendar, MapPin, Ticket } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { useState } from "react";
 import { toast } from "sonner";
-// paste INSIDE the component function, near top (above handlers)
-const [email, setEmail] = useState<string>("");
-const [qty, setQty] = useState<number>(1);
-const [submitting, setSubmitting] = useState<boolean>(false);
-const [selectedEvent, setSelectedEvent] = useState<any | null>(null); // replace `any` with your Event type if you have one
 
 /**
  * Defensive Razorpay loader that returns true if loaded
@@ -108,96 +104,99 @@ const EventListings = () => {
     setBookingForms(updatedForms);
   };
 
- async function handleBookingSubmit(e: React.FormEvent) {
-  e.preventDefault();
-  if (!selectedEvent) return;
-
-  try {
+  const handleBookingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEvent) return;
     setSubmitting(true);
 
-    // 1️⃣ Call backend to create order
-    const resp = await fetch("/api/checkout/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventId: selectedEvent.id,
-        qty,
-        email,
-      }),
-    });
-
-    const text = await resp.text();
-
-    if (!resp.ok) {
-      console.error("create-order failed:", resp.status, text);
-      alert("Could not create order. Please try again.");
+    // 1) Load Razorpay checkout SDK
+    const loaded = await loadRazorpaySDK();
+    if (!loaded) {
+      toast.error("Failed to load payment gateway. Check your connection.");
       setSubmitting(false);
       return;
     }
 
-    const data = JSON.parse(text);
-    const key = data.key;
-    const orderId = data.orderId;
-    const amount = Number(data.amount);
+    // 2) Create order on server (/api/checkout/start)
+    try {
+      // total amount in paise
+      const totalPaise = (Number(selectedEvent.price_rupees || 0) * numberOfTickets) * 100;
 
-    if (!key || !orderId || isNaN(amount)) {
-      console.error("bad payload", data);
-      alert("Bad order data from server.");
-      setSubmitting(false);
-      return;
-    }
+      const resp = await fetch("/api/checkout/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventId: selectedEvent.id,
+          qty: numberOfTickets,
+          email: bookingForms[0]?.email || ""
+        })
+      });
 
-    // 2️⃣ Load Razorpay script
-    await loadRazorpay();
-    const Razorpay = (window as any).Razorpay;
+      if (!resp.ok) {
+        const text = await resp.text();
+        console.error("create-order failed:", resp.status, text);
+        toast.error("Could not create order. Please try again.");
+        setSubmitting(false);
+        return;
+      }
 
-    if (!Razorpay) {
-      alert("Could not load payment SDK. Check your internet connection and try again.");
-      setSubmitting(false);
-      return;
-    }
+      const data = await resp.json();
+      // validate server response
+      const key = data?.key || import.meta.env.VITE_RAZORPAY_KEY_ID;
+      const orderId = data?.orderId;
+      const amount = Number(data?.amount || totalPaise);
 
-    // 3️⃣ Create checkout
-    const options = {
-      key,
-      order_id: orderId,
-      amount,
-      currency: "INR",
-      name: "Stub+",
-      description: selectedEvent.title || "Booking",
-      prefill: { email },
-      theme: { color: "#111827" },
-      handler: function (resp: any) {
-        const params = new URLSearchParams({
-          order_id: data.localOrderId || "",
-          rzp_order: orderId,
-          rzp_payment: resp.razorpay_payment_id || "",
-        });
-        window.location.href = `/booking-confirmation?${params.toString()}`;
-      },
-      modal: {
-        ondismiss: function () {
-          console.warn("Checkout dismissed by user");
+      if (!key || !orderId || !amount || Number.isNaN(amount)) {
+        console.error("Bad order payload:", data);
+        toast.error("Order creation returned invalid data.");
+        setSubmitting(false);
+        return;
+      }
+
+      // 3) Open Razorpay checkout
+      const Razorpay = (window as any).Razorpay;
+      const options = {
+        key,
+        amount,
+        currency: "INR",
+        name: "Stub+",
+        description: selectedEvent.title || "Event Booking",
+        order_id: orderId,
+        prefill: {
+          email: bookingForms[0]?.email || "",
+          name: bookingForms[0]?.name || ""
         },
-      },
-    };
+        theme: { color: "#111827" },
+        handler: function (payload: any) {
+          // On successful payment -> redirect to confirmation page with local order id + rzp ids
+          const params = new URLSearchParams({
+            order_id: data.localOrderId || "",
+            rzp_order: orderId,
+            rzp_payment: payload.razorpay_payment_id || ""
+          });
+          window.location.href = `/booking-confirmation?${params.toString()}`;
+        },
+        modal: {
+          ondismiss: function () {
+            console.warn("Checkout dismissed");
+          }
+        }
+      };
 
-    const rzp = new Razorpay(options);
+      const rzp = new Razorpay(options);
+      rzp.on("payment.failed", (err: any) => {
+        console.error("Razorpay failure:", err?.error);
+        alert(`Payment failed: ${err?.error?.description || "Unknown error"}`);
+      });
 
-    rzp.on("payment.failed", (err: any) => {
-      console.error("Razorpay failed:", err?.error);
-      alert(`Payment failed: ${err?.error?.description || "Cancelled/Failed"}`);
-    });
-
-    rzp.open();
-  } catch (err) {
-    console.error("checkout crash", err);
-    alert("Something went wrong while opening the payment window.");
-  } finally {
-    setSubmitting(false);
-  }
-}
-
+      rzp.open();
+    } catch (err: any) {
+      console.error("checkout error:", err);
+      toast.error("Something went wrong while creating order.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
