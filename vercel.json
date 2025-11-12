@@ -2,5 +2,15 @@
   "rewrites": [
     { "source": "/(.*)", "destination": "/" }
   ],
-  "functions": {}
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' https://checkout.razorpay.com; connect-src 'self' https://api.razorpay.com https://*.supabase.co; img-src 'self' data: https://*.supabase.co; style-src 'self' 'unsafe-inline';"
+        }
+      ]
+    }
+  ]
 }
