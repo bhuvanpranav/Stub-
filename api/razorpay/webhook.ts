@@ -1,57 +1,105 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import crypto from "crypto";
-import { createClient } from "@supabase/supabase-js";
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import crypto from 'crypto';
+import Razorpay from 'razorpay';
+import { createClient } from '@supabase/supabase-js';
 
-export const config = { api: { bodyParser: false } };
+// ---- Environment Variables ---- //
+const supabaseUrl = process.env.VITE_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE!;
+const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+const razorpayKeyId = process.env.VITE_RAZORPAY_KEY_ID!;
+const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET!;
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY!
-);
-
-function rawBody(req: VercelRequest): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ""; req.on("data", c => data += c);
-    req.on("end", () => resolve(data));
-    req.on("error", reject);
-  });
-}
+// ---- Initialize Clients ---- //
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const razorpay = new Razorpay({
+  key_id: razorpayKeyId,
+  key_secret: razorpayKeySecret,
+});
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
   try {
-    const body = await rawBody(req);
-    const sig  = req.headers["x-razorpay-signature"] as string;
-    const expected = crypto.createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET!)
-      .update(body).digest("hex");
-    if (sig !== expected) return res.status(401).send("bad_sig");
+    const signature = (req.headers['x-razorpay-signature'] as string) || '';
+    const body = req.body;
 
-    const event = JSON.parse(body);
-    if (event.event !== "payment.captured") return res.json({ ok: true });
+    // Verify Razorpay signature
+    const shasum = crypto.createHmac('sha256', webhookSecret);
+    shasum.update(JSON.stringify(body));
+    const digest = shasum.digest('hex');
 
-    const payment = event.payload.payment.entity;
-    const rzpOrderId = payment.order_id;
-    const paymentId  = payment.id;
+    if (digest !== signature) {
+      console.error('❌ Invalid webhook signature');
+      return res.status(400).json({ error: 'Invalid signature' });
+    }
 
-    const { data: order, error } = await supabase
-      .from("orders").select("*").eq("provider_order_id", rzpOrderId).single();
-    if (error || !order) return res.status(404).json({ ok: false, reason: "order_not_found" });
+    const event = body.event;
+    const payload = body.payload?.payment?.entity;
 
-    await supabase.from("orders")
-      .update({ status: "paid", provider_payment_id: paymentId, updated_at: new Date().toISOString() })
-      .eq("id", order.id);
+    console.log('📩 Razorpay event received:', event);
 
-    const tickets = Array.from({ length: order.qty }).map(() => ({
-      order_id: order.id,
-      event_id: order.event_id,
-      owner_email: order.email,
-      status: "active"
-    }));
+    // Process successful payment
+    if (event === 'payment.captured' && payload) {
+      const rzpOrderId = payload.order_id;
+      const paymentId = payload.id;
+      const amount = payload.amount;
+      const email = payload.email;
 
-    const { error: tErr } = await supabase.from("tickets").insert(tickets);
-    if (tErr) return res.status(500).json({ ok: false, reason: "ticket_insert_failed" });
+      // Find the order in Supabase
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('provider_order_id', rzpOrderId)
+        .single();
 
-    return res.json({ ok: true });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, reason: e.message });
+      if (orderError || !order) {
+        console.error('❌ Order not found:', orderError);
+        return res.status(404).json({ error: 'Order not found' });
+      }
+
+      // Update order to "paid"
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          status: 'paid',
+          provider_payment_id: paymentId,
+          amount_paise: amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', order.id);
+
+      if (updateError) {
+        console.error('❌ Order update failed:', updateError);
+        return res.status(500).json({ error: 'Failed to update order' });
+      }
+
+      // Insert tickets
+      const qty = Number(order.qty || 1);
+      const tickets = Array.from({ length: qty }).map(() => ({
+        order_id: order.id,
+        event_id: order.event_id,
+        owner_email: order.email || email,
+        status: 'active',
+        created_at: new Date().toISOString(),
+      }));
+
+      const { error: ticketError } = await supabase.from('tickets').insert(tickets);
+      if (ticketError) {
+        console.error('❌ Ticket insert failed:', ticketError);
+        return res.status(500).json({ error: 'Ticket creation failed' });
+      }
+
+      console.log(`✅ Order ${order.id} confirmed and ${qty} ticket(s) created.`);
+      return res.status(200).json({ success: true });
+    }
+
+    // Ignore non-payment events
+    return res.status(200).json({ received: true });
+  } catch (err: any) {
+    console.error('💥 Webhook handler crashed:', err);
+    return res.status(500).json({ error: 'Internal Server Error', detail: err.message });
   }
 }
